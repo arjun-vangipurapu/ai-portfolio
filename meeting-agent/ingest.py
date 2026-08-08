@@ -33,20 +33,23 @@ JSON:
 """)
 
 def extract_structure(transcript: str) -> dict:
-    response = llm.invoke(extract_prompt.format(transcript=transcript))
-    raw = response.content
-    clean = re.sub(r"```json|```", "", raw).strip()
-    try:
-        return json.loads(clean)
-    except Exception as e:
-        print(f"Parse error: {e}")
-        print(f"Raw output: {raw}")
-        return {"decisions": [], "action_items": [], "summary": raw}
+    for attempt in range(2):
+        try:
+            response = llm.invoke(extract_prompt.format(transcript=transcript))
+            raw = response.content
+            clean = re.sub(r"```json|```", "", raw).strip()
+            return json.loads(clean)
+        except Exception as e:
+            if attempt == 0:
+                print(f"⚠️ Parse error, retrying: {e}")
+                continue
+            print(f"❌ Extraction failed after retry: {e}")
+            return {"decisions": [], "action_items": [], "summary": "extraction failed"}
 
 def ingest_transcript(transcript: str, meeting_date: str, meeting_title: str):
     print(f"\nIngesting: {meeting_title}...")
     structured = extract_structure(transcript)
-    print(f"Extracted: {len(structured['decisions'])} decisions, "
+    print(f"✅ Extracted: {len(structured['decisions'])} decisions, "
           f"{len(structured['action_items'])} action items")
 
     doc = Document(
@@ -65,5 +68,5 @@ def ingest_transcript(transcript: str, meeting_date: str, meeting_title: str):
         embedding_function=embeddings
     )
     vectorstore.add_documents([doc])
-    print(f"Indexed: {meeting_title}")
+    print(f"📁 Indexed: {meeting_title}")
     return structured

@@ -20,61 +20,74 @@ def load_vectorstore():
     )
 
 def semantic_search(query: str) -> str:
-    vs = load_vectorstore()
-    docs = vs.similarity_search(query, k=3)
-    if not docs:
-        return "No relevant meetings found."
-    results = []
-    for doc in docs:
-        results.append(
-            f"[{doc.metadata['date']} — {doc.metadata['title']}]\n"
-            f"Summary: {doc.metadata['summary']}\n"
-            f"Decisions: {doc.metadata['decisions']}"
-        )
-    return "\n\n".join(results)
+    """Search across past meeting transcripts semantically"""
+    try:
+        vs = load_vectorstore()
+        docs = vs.similarity_search(query, k=3)
+        if not docs:
+            return "No relevant meetings found. Try rephrasing your question."
+        results = []
+        for doc in docs:
+            results.append(
+                f"[{doc.metadata['date']} — {doc.metadata['title']}]\n"
+                f"Summary: {doc.metadata['summary']}\n"
+                f"Decisions: {doc.metadata['decisions']}"
+            )
+        return "\n\n".join(results)
+    except Exception as e:
+        return f"Search failed: {e}"
 
 def action_tracker(owner: str = None) -> str:
-    vs = load_vectorstore()
-    all_docs = vs.get()
-    action_items = []
+    """Get all open action items, optionally filtered by owner"""
+    try:
+        vs = load_vectorstore()
+        all_docs = vs.get()
+        action_items = []
 
-    for metadata in all_docs["metadatas"]:
-        items = json.loads(metadata.get("action_items", "[]"))
-        for item in items:
-            if item.get("resolved"):
-                continue
-            if owner and owner.lower() not in item.get("owner", "").lower():
-                continue
-            item["meeting"] = metadata.get("title")
-            item["meeting_date"] = metadata.get("date")
-            action_items.append(item)
+        for metadata in all_docs["metadatas"]:
+            items = json.loads(metadata.get("action_items", "[]"))
+            for item in items:
+                if item.get("resolved"):
+                    continue
+                if owner and owner.lower() not in item.get("owner", "").lower():
+                    continue
+                item["meeting"] = metadata.get("title")
+                item["meeting_date"] = metadata.get("date")
+                action_items.append(item)
 
-    if not action_items:
-        return "No open action items found."
+        if not action_items:
+            return f"No open action items found{' for ' + owner if owner else ''}."
 
-    lines = []
-    for a in action_items:
-        lines.append(
-            f"• [{a['meeting_date']} — {a['meeting']}] "
-            f"{a['task']} — Owner: {a['owner']} "
-            f"— Due: {a.get('due', 'not set')}"
-        )
-    return "\n".join(lines)
+        lines = []
+        for a in action_items:
+            lines.append(
+                f"• [{a['meeting_date']} — {a['meeting']}] "
+                f"{a['task']} — Owner: {a['owner']} "
+                f"— Due: {a.get('due', 'not set')}"
+            )
+        return "\n".join(lines)
+    except Exception as e:
+        return f"Action tracker failed: {e}"
 
 def conflict_check(new_decision: str) -> str:
-    vs = load_vectorstore()
-    docs = vs.similarity_search(new_decision, k=3)
+    """Check if a new decision conflicts with past decisions"""
+    try:
+        vs = load_vectorstore()
+        docs = vs.similarity_search(new_decision, k=3)
 
-    if not docs:
-        return "No past decisions found to compare."
+        if not docs:
+            return "No past decisions found to compare."
 
-    past_decisions = []
-    for doc in docs:
-        decisions = json.loads(doc.metadata.get("decisions", "[]"))
-        for d in decisions:
-            past_decisions.append(f"[{doc.metadata['date']}] {d}")
+        past_decisions = []
+        for doc in docs:
+            decisions = json.loads(doc.metadata.get("decisions", "[]"))
+            for d in decisions:
+                past_decisions.append(f"[{doc.metadata['date']}] {d}")
 
-    conflict_prompt = PromptTemplate.from_template("""
+        if not past_decisions:
+            return "No past decisions found to compare."
+
+        conflict_prompt = PromptTemplate.from_template("""
 Does the new decision conflict with any past decisions?
 Be specific. If no conflict, say "No conflict found."
 
@@ -85,8 +98,10 @@ Past decisions:
 
 Analysis:
 """)
-    response = llm.invoke(conflict_prompt.format(
-        new_decision=new_decision,
-        past="\n".join(past_decisions)
-    ))
-    return response.content
+        response = llm.invoke(conflict_prompt.format(
+            new_decision=new_decision,
+            past="\n".join(past_decisions)
+        ))
+        return response.content
+    except Exception as e:
+        return f"Conflict check failed: {e}"
