@@ -1,8 +1,15 @@
-from langchain_ollama import OllamaLLM
+from langchain_groq import ChatGroq
 from langchain_core.prompts import PromptTemplate
 from tools import semantic_search, action_tracker, conflict_check
+from dotenv import load_dotenv
+import os
 
-llm = OllamaLLM(model="mistral")
+load_dotenv()
+
+llm = ChatGroq(
+    model="llama-3.1-8b-instant",
+    api_key=os.getenv("GROQ_API_KEY")
+)
 
 router_prompt = PromptTemplate.from_template("""
 You are an agent with three tools. Pick the right one.
@@ -46,18 +53,17 @@ def run_agent():
             continue
 
         # Step 1: Route
-        tool_choice = llm.invoke(
+        response = llm.invoke(
             router_prompt.format(question=question)
-        ).strip().lower()
-
+        )
+        tool_choice = response.content.strip().lower()
         print(f"🔧 Tool: {tool_choice}")
 
         # Step 2: Execute
         if "action_tracker" in tool_choice:
-            words = question.split()
-            owner = None
             known_names = ["sai", "priya", "rahul", "kiran", "ananya"]
-            for w in words:
+            owner = None
+            for w in question.split():
                 if w.lower() in known_names:
                     owner = w
                     break
@@ -72,7 +78,7 @@ def run_agent():
             question=question,
             result=result
         ))
-        print(f"\n🤖 {answer}")
+        print(f"\n🤖 {answer.content}")
         print("─" * 50)
 
 if __name__ == "__main__":

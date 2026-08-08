@@ -1,11 +1,17 @@
-from langchain_ollama import OllamaLLM
+from langchain_groq import ChatGroq
 from langchain_core.prompts import PromptTemplate
 from langchain_community.embeddings import SentenceTransformerEmbeddings
 from langchain_chroma import Chroma
 from langchain_core.documents import Document
-import json, re
+from dotenv import load_dotenv
+import json, re, os
 
-llm = OllamaLLM(model="mistral")
+load_dotenv()
+
+llm = ChatGroq(
+    model="llama-3.1-8b-instant",
+    api_key=os.getenv("GROQ_API_KEY")
+)
 embeddings = SentenceTransformerEmbeddings(model_name="all-MiniLM-L6-v2")
 
 extract_prompt = PromptTemplate.from_template("""
@@ -27,7 +33,8 @@ JSON:
 """)
 
 def extract_structure(transcript: str) -> dict:
-    raw = llm.invoke(extract_prompt.format(transcript=transcript))
+    response = llm.invoke(extract_prompt.format(transcript=transcript))
+    raw = response.content
     clean = re.sub(r"```json|```", "", raw).strip()
     try:
         return json.loads(clean)

@@ -1,11 +1,17 @@
 from langchain_chroma import Chroma
 from langchain_community.embeddings import SentenceTransformerEmbeddings
-from langchain_ollama import OllamaLLM
+from langchain_groq import ChatGroq
 from langchain_core.prompts import PromptTemplate
-import json
+from dotenv import load_dotenv
+import json, os
+
+load_dotenv()
 
 embeddings = SentenceTransformerEmbeddings(model_name="all-MiniLM-L6-v2")
-llm = OllamaLLM(model="mistral")
+llm = ChatGroq(
+    model="llama-3.1-8b-instant",
+    api_key=os.getenv("GROQ_API_KEY")
+)
 
 def load_vectorstore():
     return Chroma(
@@ -14,7 +20,6 @@ def load_vectorstore():
     )
 
 def semantic_search(query: str) -> str:
-    """Search across past meeting transcripts semantically"""
     vs = load_vectorstore()
     docs = vs.similarity_search(query, k=3)
     if not docs:
@@ -29,7 +34,6 @@ def semantic_search(query: str) -> str:
     return "\n\n".join(results)
 
 def action_tracker(owner: str = None) -> str:
-    """Get all open action items, optionally filtered by owner"""
     vs = load_vectorstore()
     all_docs = vs.get()
     action_items = []
@@ -58,7 +62,6 @@ def action_tracker(owner: str = None) -> str:
     return "\n".join(lines)
 
 def conflict_check(new_decision: str) -> str:
-    """Check if a new decision conflicts with past decisions"""
     vs = load_vectorstore()
     docs = vs.similarity_search(new_decision, k=3)
 
@@ -82,7 +85,8 @@ Past decisions:
 
 Analysis:
 """)
-    return llm.invoke(conflict_prompt.format(
+    response = llm.invoke(conflict_prompt.format(
         new_decision=new_decision,
         past="\n".join(past_decisions)
     ))
+    return response.content
