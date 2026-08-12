@@ -7,3 +7,6 @@ chromadb
 sentence-transformers
 streamlit
 python-dotenv
+fastapi
+uvicorn
+slowapi

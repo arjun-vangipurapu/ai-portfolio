@@ -10,14 +10,22 @@ from ingest import ingest_transcript
 from dotenv import load_dotenv
 import os, json
 from datetime import datetime
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
+from fastapi import Request, Depends
+from auth import verify_api_key
 
-load_dotenv()
-
+limiter = Limiter(key_func=get_remote_address)
 app = FastAPI(
     title="Meeting Intelligence Agent",
     description="RAG-powered agent for meeting transcripts",
     version="1.0.0"
 )
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+load_dotenv()
 
 llm = ChatGroq(
     model="llama-3.1-8b-instant",
@@ -116,16 +124,17 @@ def root():
     }
 
 @app.post("/ingest", response_model=IngestResponse)
-def ingest(request: IngestRequest):
+@limiter.limit("10/minute")
+def ingest(request: Request, body: IngestRequest, api_key: str = Depends(verify_api_key)):
     try:
         structured = ingest_transcript(
-            request.transcript,
-            request.meeting_date,
-            request.meeting_title
+            body.transcript,
+            body.meeting_date,
+            body.meeting_title
         )
         return IngestResponse(
             status="indexed",
-            meeting_title=request.meeting_title,
+            meeting_title=body.meeting_title,
             decisions_count=len(structured.get("decisions", [])),
             action_items_count=len(structured.get("action_items", []))
         )
@@ -133,12 +142,12 @@ def ingest(request: IngestRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/query", response_model=QueryResponse)
-def query(request: QueryRequest):
+@limiter.limit("10/minute")
+def query(request: Request, body: QueryRequest, api_key: str = Depends(verify_api_key)):
     try:
         total_tokens = 0
 
-        # Route
-        response = llm.invoke(router_prompt.format(question=request.question))
+        response = llm.invoke(router_prompt.format(question=body.question))
         usage = response.response_metadata.get("token_usage", {})
         total_tokens += usage.get("total_tokens", 0)
 
@@ -150,24 +159,22 @@ def query(request: QueryRequest):
         if not tools_needed:
             tools_needed = ["semantic_search"]
 
-        # Execute tools
         results = []
         for tool in tools_needed:
-            tool_result = execute_tool(tool, request.question)
+            tool_result = execute_tool(tool, body.question)
             results.append(f"[{tool}]\n{tool_result}")
 
         combined = "\n\n".join(results)
 
-        # Synthesize
         answer_response = llm.invoke(synthesize_prompt.format(
-            question=request.question,
+            question=body.question,
             result=combined
         ))
         usage = answer_response.response_metadata.get("token_usage", {})
         total_tokens += usage.get("total_tokens", 0)
 
         return QueryResponse(
-            question=request.question,
+            question=body.question,
             answer=answer_response.content,
             tools_used=tools_needed,
             tokens_used=total_tokens,
@@ -177,7 +184,8 @@ def query(request: QueryRequest):
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/meetings", response_model=list[MeetingSummary])
-def list_meetings():
+@limiter.limit("20/minute")
+def list_meetings(request: Request, api_key: str = Depends(verify_api_key)):
     try:
         vs = Chroma(
             persist_directory="./meeting_index",
@@ -197,7 +205,8 @@ def list_meetings():
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/actions", response_model=list[ActionItem])
-def list_actions(owner: str = None):
+@limiter.limit("20/minute")
+def list_actions(request: Request, api_key: str = Depends(verify_api_key), owner: str = None):
     try:
         vs = Chroma(
             persist_directory="./meeting_index",
@@ -225,7 +234,8 @@ def list_actions(owner: str = None):
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.delete("/reset")
-def reset_index():
+@limiter.limit("5/minute")
+def reset_index(request: Request, api_key: str = Depends(verify_api_key)):
     try:
         import shutil
         shutil.rmtree("./meeting_index", ignore_errors=True)
