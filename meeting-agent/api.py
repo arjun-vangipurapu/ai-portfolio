@@ -139,7 +139,8 @@ def query(request: QueryRequest):
 
         # Route
         response = llm.invoke(router_prompt.format(question=request.question))
-        total_tokens += response.response_metadata.get("usage", {}).get("total_tokens", 0)
+        usage = response.response_metadata.get("token_usage", {})
+        total_tokens += usage.get("total_tokens", 0)
 
         raw_tools = response.content.strip().lower()
         tools_needed = [
