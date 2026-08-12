@@ -163,7 +163,8 @@ def query(request: QueryRequest):
             question=request.question,
             result=combined
         ))
-        total_tokens += answer_response.response_metadata.get("usage", {}).get("total_tokens", 0)
+        usage = answer_response.response_metadata.get("token_usage", {})
+        total_tokens += usage.get("total_tokens", 0)
 
         return QueryResponse(
             question=request.question,
