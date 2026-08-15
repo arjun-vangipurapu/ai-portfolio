@@ -35,8 +35,22 @@ You are a SQL expert. Generate a SQLite SQL query for the question below.
 Return ONLY the SQL query, nothing else. No markdown, no explanation.
 ALWAYS include the company name or symbol in SELECT statements.
 
-Database schema:
-{schema}
+Database schema with columns:
+- stock_history: Date, Open, High, Low, Close, Volume, Dividends, Stock Splits, symbol, company
+- quarterly_financials: index, symbol, company (and various financial metrics)
+- company_metrics: symbol, company, market_cap, pe_ratio, revenue_growth, gross_margins, operating_margins, return_on_equity, debt_to_equity, current_ratio, forward_pe, price_to_book, 52_week_high, 52_week_low
+- revenue_summary: symbol, company, quarter, revenue_billion, yoy_growth_pct
+
+Important rules:
+- Never JOIN tables unless the question explicitly needs data from multiple tables
+- For "revenue match guidance" questions, ONLY query revenue_summary table
+- Keep queries as simple as possible — avoid unnecessary JOINs
+- revenue_billion and yoy_growth_pct ONLY exist in revenue_summary table
+- pe_ratio, market_cap, margins ONLY exist in company_metrics table
+- Never select revenue_billion from company_metrics
+- For revenue questions always use revenue_summary table
+- ALWAYS include symbol or company column in every SELECT statement
+- ALWAYS select revenue_billion and yoy_growth_pct when question is about revenue or guidance
 
 Companies available: Apple (AAPL), Microsoft (MSFT), Infosys (INFY)
 

@@ -133,8 +133,8 @@ async def orchestrate(question: str) -> dict:
         # Synthesize
         answer_response = llm.invoke(synthesis_prompt.format(
             question=question,
-            pdf_result=pdf_result,
-            db_result=db_result
+            pdf_result=pdf_result[:1500],  # truncate to avoid token limit
+            db_result=db_result[:1000]
         ))
         result["answer"] = answer_response.content
 

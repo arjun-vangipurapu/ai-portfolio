@@ -19,7 +19,11 @@ llm = ChatGroq(
 )
 
 embeddings = SentenceTransformerEmbeddings(model_name="all-MiniLM-L6-v2")
-reranker = CrossEncoder("cross-encoder/ms-marco-MiniLM-L-6-v2")
+try:
+    reranker = CrossEncoder("cross-encoder/ms-marco-MiniLM-L-6-v2")
+except Exception as e:
+    print(f"⚠️ Reranker load failed: {e}. Using similarity search only.")
+    reranker = None
 
 TRANSCRIPT_DIR = "data/transcripts"
 CHROMA_DIR = "data/chroma_transcripts"
@@ -50,8 +54,9 @@ def load_pdfs() -> list[Document]:
 def chunk_documents(docs: list[Document]) -> list[Document]:
     chunks = []
     for doc in docs:
-        # chunk by paragraph
-        paragraphs = [p.strip() for p in doc.page_content.split("\n\n") if len(p.strip()) > 100]
+        # chunk by paragraph with smaller size
+        paragraphs = [p.strip() for p in doc.page_content.split("\n\n") 
+                     if len(p.strip()) > 50]  # lower threshold from 100 to 50
         for para in paragraphs:
             chunks.append(Document(
                 page_content=para,
@@ -120,17 +125,20 @@ def hybrid_search(query: str, vectorstore, chunks: list[Document], k: int = 10) 
             merged.append(doc)
 
     # rerank
-    if len(merged) > 3:
+    if reranker is not None and len(merged) > 3:
         pairs = [[query, doc.page_content] for doc in merged]
         scores = reranker.predict(pairs)
         ranked = sorted(zip(scores, merged), reverse=True)
-        merged = [doc for _, doc in ranked[:5]]
-
+        merged = [doc for _, doc in ranked[:3]]
+    else:
+        merged = merged[:3]
     return merged
 
 answer_prompt = PromptTemplate.from_template("""
 You are a financial analyst. Answer the question using ONLY the transcript excerpts below.
-Always mention the company name and context.
+If searching for strategy or plans, also look for related terms like product names,
+revenue segments, or executive quotes about future direction.
+Always mention the company name and source page.
 If the answer is not in the excerpts, say "Not found in transcripts."
 
 Excerpts:
@@ -144,13 +152,20 @@ Answer:
 def run_pdf_agent(question: str) -> str:
     try:
         vectorstore, chunks = load_index()
-        results = hybrid_search(question, vectorstore, chunks)
+        expanded_query = question
+        if any(word in question.lower() for word in [
+            "strategy", "plan", "future", "outlook", 
+            "guidance", "match", "revenue"
+        ]):
+            expanded_query = f"{question} quarterly revenue record billion September quarter results"
+
+        results = hybrid_search(expanded_query, vectorstore, chunks)
 
         if not results:
             return "No relevant content found in transcripts."
 
         context = "\n\n---\n\n".join([
-            f"[{doc.metadata['source']} p.{doc.metadata['page']}]\n{doc.page_content}"
+            f"[{doc.metadata['source']} p.{doc.metadata['page']}]\n{doc.page_content[:800]}"
             for doc in results
         ])
 
