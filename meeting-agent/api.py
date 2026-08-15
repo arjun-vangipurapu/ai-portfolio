@@ -15,6 +15,9 @@ from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 from fastapi import Request, Depends
 from auth import verify_api_key
+import time
+from observability import track_query, track_tool_call, shutdown, get_langfuse_handler
+import atexit
 
 limiter = Limiter(key_func=get_remote_address)
 app = FastAPI(
@@ -146,8 +149,23 @@ def ingest(request: Request, body: IngestRequest, api_key: str = Depends(verify_
 def query(request: Request, body: QueryRequest, api_key: str = Depends(verify_api_key)):
     try:
         total_tokens = 0
+        query_start = time.time()
+        langfuse_handler = get_langfuse_handler()  # add this line
 
-        response = llm.invoke(router_prompt.format(question=body.question))
+        # # Langfuse handler for this request
+        # langfuse_handler = get_langfuse_handler(
+        #     session_id=f"session-{int(time.time())}",
+        #     user_id=api_key[:8]
+        # )
+
+        # Step 1: Route
+        route_start = time.time()
+        response = llm.invoke(
+            router_prompt.format(question=body.question),
+            config={"callbacks": [langfuse_handler]}
+        )
+        route_latency = int((time.time() - route_start) * 1000)
+
         usage = response.response_metadata.get("token_usage", {})
         total_tokens += usage.get("total_tokens", 0)
 
@@ -159,19 +177,46 @@ def query(request: Request, body: QueryRequest, api_key: str = Depends(verify_ap
         if not tools_needed:
             tools_needed = ["semantic_search"]
 
+        print(f" Tools: {tools_needed} ({route_latency}ms)")
+
+        # Step 2: Execute tools with timing
         results = []
         for tool in tools_needed:
+            tool_start = time.time()
             tool_result = execute_tool(tool, body.question)
+            tool_latency = int((time.time() - tool_start) * 1000)
             results.append(f"[{tool}]\n{tool_result}")
+            print(f"  → {tool}: {tool_latency}ms")
 
         combined = "\n\n".join(results)
 
-        answer_response = llm.invoke(synthesize_prompt.format(
-            question=body.question,
-            result=combined
-        ))
+        # Step 3: Synthesize
+        synth_start = time.time()
+        answer_response = llm.invoke(
+            synthesize_prompt.format(
+                question=body.question,
+                result=combined
+            ),
+            config={"callbacks": [langfuse_handler]}
+        )
+        synth_latency = int((time.time() - synth_start) * 1000)
+
         usage = answer_response.response_metadata.get("token_usage", {})
         total_tokens += usage.get("total_tokens", 0)
+
+        total_latency = int((time.time() - query_start) * 1000)
+        print(f"  → synthesis: {synth_latency}ms")
+        print(f"💰 Total: {total_tokens} tokens | {total_latency}ms")
+
+        # Track in Langfuse
+        track_query(
+            question=body.question,
+            answer=answer_response.content,
+            tools_used=tools_needed,
+            tokens=total_tokens,
+            latency_ms=total_latency,
+            api_key=api_key
+        )
 
         return QueryResponse(
             question=body.question,
