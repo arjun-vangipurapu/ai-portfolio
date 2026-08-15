@@ -73,17 +73,30 @@ def build_index():
     print(f"  ✅ ChromaDB index built")
     return vectorstore, chunks
 
+# module-level cache
+_vectorstore = None
+_chunks = None
+
 def load_index():
-    if not os.path.exists(CHROMA_DIR):
-        return build_index()
-    vectorstore = Chroma(
-        persist_directory=CHROMA_DIR,
-        embedding_function=embeddings
-    )
-    # reload chunks for BM25
-    docs = load_pdfs()
-    chunks = chunk_documents(docs)
-    return vectorstore, chunks
+    global _vectorstore, _chunks
+    
+    # return cached if already loaded
+    if _vectorstore is not None and _chunks is not None:
+        print("  ⚡ Using cached index")
+        return _vectorstore, _chunks
+    
+    if os.path.exists(CHROMA_DIR) and os.listdir(CHROMA_DIR):
+        print("  📂 Loading existing index...")
+        _vectorstore = Chroma(
+            persist_directory=CHROMA_DIR,
+            embedding_function=embeddings
+        )
+        docs = load_pdfs()
+        _chunks = chunk_documents(docs)
+        return _vectorstore, _chunks
+    
+    _vectorstore, _chunks = build_index()
+    return _vectorstore, _chunks
 
 def hybrid_search(query: str, vectorstore, chunks: list[Document], k: int = 10) -> list[Document]:
     # semantic search

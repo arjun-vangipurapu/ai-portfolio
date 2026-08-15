@@ -33,6 +33,7 @@ def get_schema() -> str:
 sql_prompt = PromptTemplate.from_template("""
 You are a SQL expert. Generate a SQLite SQL query for the question below.
 Return ONLY the SQL query, nothing else. No markdown, no explanation.
+ALWAYS include the company name or symbol in SELECT statements.
 
 Database schema:
 {schema}
